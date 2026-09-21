@@ -36,6 +36,16 @@ const responseSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // --- NEW: streak tracking ---
+  streakAtSubmission: {
+    type: Number,
+    default: 0
+  },
+  bonusPoints: {
+    type: Number,
+    default: 0
+  },
+  // ----------------------------
   createdAt: {
     type: Date,
     default: Date.now
