@@ -21,10 +21,12 @@ import { isRedisEnabled, getRedisClient } from '../config/redis.js'
 
 let ResponseModel = null
 let UserModel = null
+let RoomStreakModel = null
 async function models() {
   if (!ResponseModel) ResponseModel = (await import('../models/Response.js')).default
   if (!UserModel) UserModel = (await import('../models/User.js')).default
-  return { Response: ResponseModel, User: UserModel }
+  if (!RoomStreakModel) RoomStreakModel = (await import('../models/RoomStreak.js')).default
+  return { Response: ResponseModel, User: UserModel, RoomStreak: RoomStreakModel }
 }
 
 const CACHE_TTL_S = Number(process.env.LEADERBOARD_CACHE_TTL_S) || 6 * 60 * 60 // rebuildable; TTL just bounds leaks
@@ -110,7 +112,7 @@ function addInto(map, sid, g) {
 // Returns { full, rankByStudent } — the SAME shape as leaderboardAgg.computeRanked, so callers are
 // interchangeable. On a cold/lost cache this folds every question = a full recompute that once.
 export async function computeRankedIncremental(roomId, { fold = true } = {}) {
-  const { Response, User } = await models()
+  const { Response, User, RoomStreak } = await models()
   const id = String(roomId)
   const roomObjId = new mongoose.Types.ObjectId(roomId)
 
@@ -157,8 +159,20 @@ export async function computeRankedIncremental(roomId, { fold = true } = {}) {
   const users = await User.find({ _id: { $in: ranked.map(([sid]) => sid) } }).select('name').lean()
   const nameById = new Map(users.map((u) => [u._id.toString(), u.name || 'Unknown Student']))
 
+  // --- NEW: join streak data fresh from Mongo (NOT cached) -------------------------------------
+  // Streaks update per answer, not per segment, so caching them alongside the folded totals would
+  // make them stale by up to one segment. Instead fetch once per board build — one indexed find
+  // on { roomId } — and merge by studentId. Missing docs default to 0/0, matching the
+  // leaderboardAgg.computeRanked output shape exactly.
+  const streaks = await RoomStreak.find({ roomId: roomObjId })
+    .select('studentId currentStreak bestStreak')
+    .lean()
+  const streakById = new Map(streaks.map((s) => [s.studentId.toString(), s]))
+  // ---------------------------------------------------------------------------------------------
+
   const rankByStudent = new Map()
   const full = ranked.map(([sid, t], i) => {
+    const s = streakById.get(sid)
     rankByStudent.set(sid, i + 1)
     return {
       rank: i + 1,
@@ -166,7 +180,11 @@ export async function computeRankedIncremental(roomId, { fold = true } = {}) {
       studentName: nameById.get(sid) || 'Unknown Student',
       totalPoints: t.points,
       correctCount: t.correct,
-      totalAnswered: t.answered
+      totalAnswered: t.answered,
+      // --- NEW: streak fields ---
+      currentStreak: s?.currentStreak ?? 0,
+      bestStreak:    s?.bestStreak    ?? 0
+      // --------------------------
     }
   })
   return { full, rankByStudent }

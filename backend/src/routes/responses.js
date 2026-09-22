@@ -5,6 +5,7 @@ import * as resultsSnapshot from '../services/resultsSnapshot.js'
 import { computeRankedIncremental } from '../services/leaderboardCache.js'
 import { checkRoomOwnership } from '../utils/roomOwnership.js'
 import { debug } from '../utils/debug.js'
+import { updateStreak } from '../services/streakService.js'
 const router = express.Router()
 
 // How many ranks are shown PUBLICLY to a student (the rest see only their own row). Must match the
@@ -196,6 +197,25 @@ router.post('/', authorize('student'), async (req, res) => {
     // upstream. This hard-caps the stored score to the valid [0, maxPoints] range.
     points = Math.max(0, Math.min(points, maxPoints))
 
+    // --- Streak + bonus (NEW) -----------------------------------------------------------------
+    // Update the student's running streak for this room (atomic upsert) and add the streak bonus
+    // on top of the time-decayed base points. The bonus is deliberately small (0 / 2 / 5) so it
+    // cannot dwarf the base score.
+    //
+    // Ordering note: we call updateStreak BEFORE writing the Response because the response doc
+    // stores the streak state at submission time and the FINAL points (base + bonus). The unique
+    // index {roomId, questionId, studentId} still rejects a duplicate submit downstream (409, or
+    // dropped in the batch path), but the streak increment will have already run in that rare
+    // case — the frontend disables Submit after the first click, so this is an edge case, not the
+    // norm. If you ever want strict transactional correctness here, wrap the streak update and
+    // the Response insert in a Mongo session/transaction.
+    const { currentStreak, bestStreak, bonusPoints } = await updateStreak({
+      roomId,
+      studentId,
+      isCorrect
+    })
+    const finalPoints = points + bonusPoints
+
     const responseData = {
       roomId,
       questionId,
@@ -204,7 +224,11 @@ router.post('/', authorize('student'), async (req, res) => {
       selectedOptions, // Store all selections for MSQ
       isCorrect,
       responseTime: respTime,
-      points
+      points: finalPoints,
+      // --- NEW: streak tracking (also withheld from the client response — see bottom of handler) ---
+      streakAtSubmission: currentStreak,
+      bonusPoints
+      // -------------------------------------------------------------------------------------------
     }
 
     // Persist. DEFAULT path: save() immediately and let the unique index
@@ -252,7 +276,17 @@ router.post('/', authorize('student'), async (req, res) => {
     // instant they submit, straight from the Network tab, and can relay it. The answer is still
     // SCORED and saved server-side; the student sees their result via the results path once polls are
     // no longer live. The client only uses `rank` from this response, so nothing it renders changes.
-    const { isCorrect: _omitIsCorrect, points: _omitPoints, ...safeResponse } = savedResponse
+    //
+    // Streak fields (streakAtSubmission, bonusPoints) leak the same information — a streak that
+    // went up implies the answer was correct — so they are stripped here too and revealed via the
+    // results path alongside isCorrect / pointsEarned.
+    const {
+      isCorrect: _omitIsCorrect,
+      points: _omitPoints,
+      streakAtSubmission: _omitStreak,
+      bonusPoints: _omitBonus,
+      ...safeResponse
+    } = savedResponse
     res.status(201).json({
       success: true,
       response: safeResponse,

@@ -17,7 +17,7 @@ async function models() {
 // Compute the full ranked leaderboard for a room in one points-per-student aggregation plus a
 // single batched name lookup (no N+1). Returns { full, rankByStudent }:
 //   full          — ranked array [{ rank, studentId, studentName, totalPoints, correctCount,
-//                    totalAnswered }], rank 1..N by totalPoints desc.
+//                    totalAnswered, currentStreak, bestStreak }], rank 1..N by totalPoints desc.
 //   rankByStudent — Map studentId -> rank, for the "rank on submit" cache.
 export async function computeRanked(roomId) {
   const { Response, User } = await models()
@@ -39,9 +39,21 @@ export async function computeRanked(roomId) {
     .lean()
   const nameById = new Map(users.map(u => [u._id.toString(), u.name || 'Unknown Student']))
 
+  // --- NEW: join streak data per student (one query, batched, no N+1) --------------------------
+  // RoomStreak is keyed on { roomId, studentId } (unique), so this is a single indexed find.
+  // Students without a RoomStreak doc (e.g. they answered only wrong, or the streak collection
+  // was populated after they answered) fall back to 0 / 0 — same shape as before, safe default.
+  const RoomStreak = (await import('../models/RoomStreak.js')).default
+  const streaks = await RoomStreak.find({ roomId: roomObjId })
+    .select('studentId currentStreak bestStreak')
+    .lean()
+  const streakById = new Map(streaks.map(s => [s.studentId.toString(), s]))
+  // --------------------------------------------------------------------------------------------
+
   const rankByStudent = new Map()
   const full = ranked.map((e, i) => {
     const sid = e._id.toString()
+    const s = streakById.get(sid)
     rankByStudent.set(sid, i + 1)
     return {
       rank: i + 1,
@@ -49,7 +61,11 @@ export async function computeRanked(roomId) {
       studentName: nameById.get(sid) || 'Unknown Student',
       totalPoints: e.totalPoints,
       correctCount: e.correctCount,
-      totalAnswered: e.totalAnswered
+      totalAnswered: e.totalAnswered,
+      // --- NEW: streak fields ---
+      currentStreak: s?.currentStreak ?? 0,
+      bestStreak:    s?.bestStreak    ?? 0
+      // --------------------------
     }
   })
 

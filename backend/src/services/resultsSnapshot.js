@@ -113,7 +113,11 @@ export async function buildSnapshot(roomId) {
           selectedOptions: resp.selectedOptions || [resp.selectedOption],
           isCorrect: resp.isCorrect,
           responseTime: resp.responseTime,
-          pointsEarned: resp.points
+          pointsEarned: resp.points,
+          // --- NEW: streak fields (revealed here because the room has ended — no poll to protect) ---
+          streakAtSubmission: resp.streakAtSubmission ?? 0,
+          bonusPoints: resp.bonusPoints ?? 0
+          // ----------------------------------------------------------------------------------------
         }),
         createdAt: q.createdAt
       }
