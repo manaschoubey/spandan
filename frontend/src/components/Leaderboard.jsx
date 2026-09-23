@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { API_URL } from '../config.js'
+import StreakBadge from './StreakBadge.jsx'
 
 const Leaderboard = ({ roomId, token, socket, userId }) => {
   const [leaderboard, setLeaderboard] = useState([])
@@ -219,6 +220,9 @@ const Leaderboard = ({ roomId, token, socket, userId }) => {
             {entry.correctCount}/{entry.totalAnswered} correct
           </div>
         </div>
+
+        {/* Streak badge — renders nothing below 2, so rows without a streak look unchanged */}
+        <StreakBadge streak={entry.currentStreak} />
 
         <div style={{
           fontSize: '16px',

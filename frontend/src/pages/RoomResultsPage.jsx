@@ -5,6 +5,7 @@ import useRoomStore from '../stores/roomStore'
 import Sidebar from '../components/Sidebar'
 import ThemeToggle from '../components/ThemeToggle'
 import ProfileDropdown from '../components/ProfileDropdown'
+import StreakBadge from '../components/StreakBadge'
 import { API_URL } from '../config.js'
 import { fetchAllRoomQuestions } from '../services/questionService'
 import useIsMobile from '../hooks/useIsMobile'
@@ -424,6 +425,10 @@ function RoomResultsPage() {
                                 {q.isCorrect ? '✓ Correct' : '✗ Incorrect'}
                               </span>
                             )}
+                            {/* Student streak badge — only when they built a streak on this answer */}
+                            {!isTeacher && q.answered && (
+                              <StreakBadge streak={q.streakAtSubmission} />
+                            )}
                           </div>
                           <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 14px', lineHeight: 1.5 }}>
                             {q.question}
@@ -552,6 +557,12 @@ function RoomResultsPage() {
                               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', fontWeight: 500 }}>
                                 / {q.maxPoints || 100} pts
                               </div>
+                              {/* Bonus breakdown — shows how much of the score came from a streak */}
+                              {q.bonusPoints > 0 && (
+                                <div style={{ fontSize: '11px', color: '#059669', marginTop: '4px', fontWeight: 700 }}>
+                                  +{q.bonusPoints} bonus
+                                </div>
+                              )}
                             </>
                           )}
                         </div>
